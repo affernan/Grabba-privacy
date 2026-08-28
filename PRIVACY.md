@@ -58,6 +58,9 @@ browsing information, editor files, or preferences. It does not use this
 information for advertising, profiling, credit decisions, or purposes unrelated
 to tab recording and local editing.
 
+Grabba's use of information received from Chrome APIs complies with the Chrome
+Web Store User Data Policy, including its Limited Use requirements.
+
 ## Permissions
 
 Grabba uses only the Chrome permissions required for its single purpose:
