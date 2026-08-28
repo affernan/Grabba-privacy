@@ -66,9 +66,11 @@ There is no network step in the editor flow.
 | `downloads` | Writes the completed MP4 to the local Downloads folder. |
 | `storage` | Stores recording preferences and non-sensitive completion status. |
 
-The extension does not request `tabs`, `<all_urls>`, host permissions,
-microphone access, camera access, cookies, browsing history, clipboard access,
-or native messaging.
+The extension does not request `tabs`, `history`, `<all_urls>`, host permissions,
+microphone access, camera access, cookies, clipboard access, or native
+messaging. `activeTab` provides the selected tab's current title and URL only
+after the user invokes Grabba; this information is processed locally and is not
+retained as browsing history.
 
 ## Security controls
 
