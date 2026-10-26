@@ -9,8 +9,8 @@ goes, and what it does not protect against.
 1. Before the first recording, the user must review the bundled local
    processing, unencrypted-file, and authorization notices, select an
    affirmative checkbox, and accept the current consent version.
-2. A user clicks the Grabba toolbar icon on an active HTTP or HTTPS tab, or
-   invokes the locally configured **Start recording** keyboard shortcut.
+2. A user clicks the Grabba toolbar icon on an active HTTP or HTTPS tab and
+   selects **Start recording** in the popup.
 3. The background worker independently verifies the accepted consent version,
    then checks the tab URL against bundled protected-service
    rules and the local UT1 policy snapshot. A blocked site never reaches the
@@ -18,8 +18,10 @@ goes, and what it does not protect against.
 4. Chrome grants temporary `activeTab` access for that user-selected tab.
 5. The background worker requests a tab-only media stream from
    `chrome.tabCapture`.
-6. The bundled offscreen recording engine holds video and optional tab audio
-   in memory while recording.
+6. The bundled offscreen recording engine streams video, optional tab audio,
+   and separately opted-in microphone audio
+   fragments to Grabba's extension-private Origin Private File System instead
+   of retaining the complete recording in memory.
 7. The user can pause and resume without moving captured data outside the
    recording engine.
 8. When the user selects **Stop and save**, or when navigation protection
@@ -29,68 +31,50 @@ goes, and what it does not protect against.
    The engine then sends a same-extension Blob URL to Chrome's downloads API.
 9. Alternatively, the user may select **Discard** and affirm a destructive
    confirmation. This immediately stops the recorder, skips MP4 finalization,
-   Blob URL creation, and the downloads API, then clears chunks and tracks
-   from the hidden recording context.
+   Blob URL creation, and the downloads API, then deletes the temporary session
+   and clears media tracks from the hidden recording context.
 10. Chrome writes a saved file to `Downloads/Grabba`. Only after Chrome
    confirms that the download is complete does the engine revoke the Blob URL,
-   clear recording chunks and media tracks, and close its offscreen document.
+   delete the temporary session, clear media tracks, and close its offscreen
+   document.
 
 There is no network step in this flow.
-
-### Local editor data flow
-
-1. The user opens the bundled editor and explicitly selects an MP4 file.
-2. Chrome provides that local file only to the editor page. Grabba does not
-   store a file handle, path, video content, or editing history in extension
-   storage.
-3. The bundled MediaBunny code reads MP4 metadata and encoded packets locally.
-   Cuts are aligned to existing video keyframes. Video is not decoded,
-   recompressed, sent to a server, or passed to another extension context.
-4. When exporting, the user chooses a new local filename through Chrome's
-   save-file interface when available. Grabba rejects the original filename.
-   If that interface is unavailable, a local Blob URL is sent directly to the
-   downloads API under `Downloads/Grabba/Edited`.
-5. The output is a new ordinary, unencrypted MP4. The selected source file is
-   never modified. Temporary Blob URLs are revoked after use, and no file
-   handle is persisted.
-
-There is no network step in the editor flow.
 
 ## Permission rationale
 
 | Permission | Purpose |
 | --- | --- |
-| `activeTab` | Temporarily identifies and authorizes only the active tab selected by an explicit toolbar or keyboard-command gesture. |
+| `activeTab` | Temporarily identifies and authorizes only the active tab selected through the toolbar popup. |
 | `tabCapture` | Captures video and, when selected, audio from that tab. |
 | `offscreen` | Runs `MediaRecorder` in a bundled hidden extension page after the popup closes. |
 | `downloads` | Writes the completed MP4 to the local Downloads folder. |
 | `storage` | Stores recording preferences and non-sensitive completion status. |
 
 The extension does not request `tabs`, `history`, `<all_urls>`, host permissions,
-microphone access, camera access, cookies, clipboard access, or native
+camera access, cookies, clipboard access, or native
 messaging. `activeTab` provides the selected tab's current title and URL only
 after the user invokes Grabba; this information is processed locally and is not
 retained as browsing history.
 
+Microphone capture is a separate, off-by-default choice. Chrome's microphone
+permission is requested when it is enabled. Grabba does not store that choice,
+does not route microphone audio to speakers, and stops the microphone track on
+save, discard, or recording failure. The browser may retain its origin-level
+permission until the user revokes it in Chrome settings.
+
 ## Security controls
 
 - Manifest V3 service worker architecture.
-- Explicit Content Security Policy with `connect-src 'none'` and no remote
-  sources. `media-src blob:` is narrowly allowed for previewing the local file
-  selected by the user; HTTP, HTTPS, data, object, frame, and worker media
-  sources remain unavailable.
+- Explicit Content Security Policy with `connect-src 'none'`, `media-src
+  'none'`, and no remote sources.
 - No `fetch`, `XMLHttpRequest`, WebSocket, telemetry, analytics, or upload
   implementation.
 - No content scripts, page injection, `eval`, `new Function`, `innerHTML`, or
   remotely hosted code.
 - No externally connectable API and no web-accessible resources.
-- Recording starts only on the current active tab and only after an explicit
-  toolbar or configured keyboard-command gesture.
-- The keyboard shortcut reuses the last locally saved quality, tab-audio, and
-  navigation-protection settings. It independently rechecks the current
-  consent version and protected-domain policy before requesting capture. If
-  consent is missing, the tab is protected, or a recording already exists,
-  Grabba opens its popup instead of bypassing the relevant control.
+- Recording starts only on the current active tab after the user opens the
+  toolbar popup and selects **Start recording**. This release declares no
+  keyboard commands.
 - A versioned first-use notice requires an affirmative checkbox before
   acceptance. Both the popup and the background worker prevent recording
   without the current consent version. The locally stored value contains no
@@ -130,19 +114,19 @@ retained as browsing history.
   consent notice version. Session storage may hold a generic filename, file
   size, duration, download identifier, stop reason, or bounded error message
   so the popup can report a completed automatic save.
-- Captured media, tab URLs, and tab titles are never written to extension
-  storage. The temporary Blob URL is revoked immediately after the local
-  download completes, and the offscreen recording document is then closed.
-- The editor never persists the selected source, file-system handle, edit
-  intervals, or output video in extension storage. File names are inserted
-  into the interface only through `textContent`, and download names are
-  sanitized.
-- The editor accepts MP4 only, validates the video track, codec, duration,
-  decoder configuration, and keyframes, and permits export only when at least
-  one interval remains.
-- All code is bundled locally. The pinned MediaBunny dependency is compiled
-  into `editor-runtime.js`; the installed extension neither downloads nor
-  dynamically imports package code.
+- Captured media is written only to a dedicated temporary directory in the
+  extension-private Origin Private File System; it is never written to
+  `chrome.storage`. The session is deleted after download or discard. A session
+  left by an unexpected Chrome shutdown is removed before the next recording.
+  Tab URLs and titles are never written into the temporary media.
+- The temporary Blob URL is revoked immediately after the local download
+  completes, and the offscreen recording document is then closed.
+- The current package has no editor entry point, editor page, editor stylesheet,
+  editor runtime bundle, or keyboard command. Static and packaged-extension
+  tests enforce their absence.
+- All executable code is bundled locally. The pinned MediaBunny dependency is
+  compiled into `recorder-remux-runtime.js`; the installed extension neither
+  downloads nor dynamically imports package code.
 
 ## Protected-domain policy
 
@@ -195,7 +179,6 @@ Run the static security audit:
 node .\tests\domain-policy.mjs
 node .\tests\security.mjs
 node .\tests\i18n.mjs
-node .\tests\editor.mjs
 ```
 
 Run the end-to-end recording suite:
@@ -214,16 +197,17 @@ resistance, and denylist-only behavior for unlisted domains.
 The end-to-end suite loads the extension into an isolated Chrome profile,
 verifies that the initial consent is unchecked, blocks direct recording before
 acceptance, persists acceptance locally, opens and validates the complete
-navigation-protection dialog, records every quality/audio combination, closes
+navigation-protection dialog, records every video quality and the no-audio,
+tab-audio, microphone-only, and combined-audio cases, closes
 and reopens the popup, saves the MP4, validates its H.264/AAC structure, and
 requires a conventional Fast Start layout with no `moof` or `mfra`, then
-verifies timeline seeking at 10%, 50%, and 90%. It also verifies pause/resume behavior, automatic
+verifies forward and backward timeline seeking at 10%, 50%, and 90%. It also
+verifies pause/resume behavior, automatic
 stop-and-save on navigation, download completion, removal of the offscreen
 recording context, confirmed discard with no download or saved result, the
-protected-domain policy loaded by Chrome's service worker, actual recording
-startup through the configured keyboard command using saved settings, and a complete
-editor workflow that removes intervals and the audio track while preserving a
-seekable MP4 and the original source file.
+protected-domain policy loaded by Chrome's service worker, and the absence of
+editor assets, editor entry points, and keyboard commands in both the source
+tree and final Store package.
 
 ## Reporting a security issue
 
